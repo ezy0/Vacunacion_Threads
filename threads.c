@@ -8,20 +8,29 @@ int minVacunasPorTanda;
 int maxVacunasPorTanda;
 int minTiempoFabricacion;
 int maxTiempoFabricacion;
-int minTiempoReparto;
+int minTiempoReparto = 1;
+int maxTiempoReparto;
+int minTiempoReaccion = 1;
 int maxTiempoReaccion;
-int minTiempoDesplazamiento;
+int minTiempoDesplazamiento = 1;
 int maxTiempoDesplazamiento;
 
 // Declaración de funciones
 void *vacunarHabitante(void *arg); // Función que ejecutará cada thread para vacunar a un habitante
 void *fabricarVacuna(void *arg); // Función que ejecutará cada thread para fabricar una vacuna
+void leerFichero(char *fichero);
 
 int main(int argc, char *argv[]) {
   // declaracion e inicialización de variables que no se leen del fichero
   int numCentros = 5;
   int numFarmacias = 3;
 
+  // Llamamos a leer fichero para inicializar el resto de variables
+  if (argc < 2)
+    leerFichero("valores.txt");
+  else
+    leerFichero(argv[1]);
+    
   // Creación de threads para vacunar a cada habitante
   pthread_t threads[numHabitantes];
   for (int i = 0; i < numHabitantes; i++) {
@@ -69,11 +78,9 @@ void *fabricarVacuna(void *arg) {
   return NULL;
 }
 
-
-/* Lectura de datos del fichero
-
+void  leerFichero(char *fichero) {
   // Abrir el fichero de texto
-  FILE *fp = fopen("valores.txt", "r");
+  FILE *fp = fopen(fichero, "r");
 
   // Leer los valores del fichero y asignarlos a las variables
   fscanf(fp, "%d", &numHabitantes);
@@ -88,5 +95,4 @@ void *fabricarVacuna(void *arg) {
 
   // Cerrar el fichero
   fclose(fp);
-
-*/
+}

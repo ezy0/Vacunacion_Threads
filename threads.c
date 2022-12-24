@@ -1,20 +1,26 @@
 #include <stdio.h>
 #include <pthread.h>
 
-// Declaración de variables globales
-int numHabitantes; // Número de habitantes a vacunar
-int numCentros; // Número de centros de vacunación
-int numFarmacias; // Número de farmacias fabricantes de vacunas
+// Declaración de variables globales que se leen del fichero
+int numHabitantes; 
+int numVacunasIniciales;
+int minVacunasPorTanda;
+int maxVacunasPorTanda;
+int minTiempoFabricacion;
+int maxTiempoFabricacion;
+int minTiempoReparto;
+int maxTiempoReaccion;
+int minTiempoDesplazamiento;
+int maxTiempoDesplazamiento;
 
 // Declaración de funciones
 void *vacunarHabitante(void *arg); // Función que ejecutará cada thread para vacunar a un habitante
 void *fabricarVacuna(void *arg); // Función que ejecutará cada thread para fabricar una vacuna
 
 int main(int argc, char *argv[]) {
-  // Inicialización de variables
-  numHabitantes = 100;
-  numCentros = 5;
-  numFarmacias = 3;
+  // declaracion e inicialización de variables que no se leen del fichero
+  int numCentros = 5;
+  int numFarmacias = 3;
 
   // Creación de threads para vacunar a cada habitante
   pthread_t threads[numHabitantes];

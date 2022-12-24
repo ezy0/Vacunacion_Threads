@@ -62,3 +62,25 @@ void *fabricarVacuna(void *arg) {
 
   return NULL;
 }
+
+
+/* Lectura de datos del fichero
+
+  // Abrir el fichero de texto
+  FILE *fp = fopen("valores.txt", "r");
+
+  // Leer los valores del fichero y asignarlos a las variables
+  fscanf(fp, "%d", &numHabitantes);
+  fscanf(fp, "%d", &numVacunasIniciales);
+  fscanf(fp, "%d", &minVacunasPorTanda);
+  fscanf(fp, "%d", &maxVacunasPorTanda);
+  fscanf(fp, "%d", &minTiempoFabricacion);
+  fscanf(fp, "%d", &maxTiempoFabricacion);
+  fscanf(fp, "%d", &maxTiempoReparto);
+  fscanf(fp, "%d", &maxTiempoReaccion);
+  fscanf(fp, "%d", &maxTiempoDesplazamiento);
+
+  // Cerrar el fichero
+  fclose(fp);
+
+*/

@@ -1,10 +1,8 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <stdlib.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-
+#include <time.h>
+#include <unistd.h>
 
 // Declaración de variables globales que se leen del fichero
 int	numHabitantes; 
@@ -20,47 +18,66 @@ int	maxTiempoReaccion;
 int	minTiempoDesplazamiento = 1;
 int	maxTiempoDesplazamiento;
 
+// Variables globales ???
+int	numFarmacias = 3;
+int	maxVacunas = 400;
+
+// Array de vacunas por centro
+int	vacunas[5];
+
+// Creacion del mutex de las vacunas por centro y de las condiciones
+pthread_mutex_t mutex_vacunas;
+pthread_cond_t disponible, no_disponible;
+
+// Declaración del fichero por donde saldrá el resultado final
+FILE	*salida;
+
 // Declaración de funciones
 void	*vacunarHabitante(void *arg); // Función que ejecutará cada thread para vacunar a un habitante
-void	*fabricarVacuna(void *arg); // Función que ejecutará cada thread para fabricar una vacuna
 void	leerFichero(char *fichero); //Damos valores a las variables que faltan por inicializar
 
 int	main(int argc, char *argv[]) {
-	// declaracion e inicialización de variables que no se leen del fichero
-	int	numCentros = 5;
-	int	numFarmacias = 3;
-
 	// Creación de threads para vacunar a cada habitante
-	pthread_t	*threadsH;
-	// Creación de threads para fabricar cada vacuna, no necesitaremos malloc porque las farmacias siempre serán 3
-	pthread_t	threadsF[numFarmacias];
+	pthread_t	*threads;
 
-	FILE	*salida;
+	//Asignamos espacio para los threads de los habitantes con malloc
+	threads = (pthread_t *)malloc(sizeof(pthread_t) * numHabitantes);
 
-	//Asignamos epacio para los threads de los habitantes con malloc
-	threadsH = (pthread_t *)malloc(sizeof(pthread_t) * numHabitantes);
+	// Inicializacion del mutex y de las condiciones
+	pthread_mutex_init(&mutex_vacunas, NULL);
+	pthread_cond_init(&disponible, NULL);
+	pthread_cond_init(&no_disponible, NULL);
 
-	// Llamamos a leer fichero para inicializar el resto de variables y declaramos las salidas
+	// Llamamos a leer fichero para inicializar el resto de variables y declaramos el fichero de salida
 	if (argc < 2) {
 		leerFichero("valores.txt");
-		salida = open("salida_vacunacion.txt", O_CREAT | O_WRONLY, 0666);
+		salida = fopen("salida_vacunacion.txt", "w");
 	}
 	else if (argc == 2) {
 		leerFichero(argv[1]);
-		salida = open("salida_vacunacion.txt", O_CREAT | O_WRONLY, 0666);
+		salida = fopen("salida_vacunacion.txt", "w");
 	}
 	else {
 		leerFichero(argv[1]);
-		salida = open(argv[2], O_CREAT | O_WRONLY, 0666);
+		salida = fopen(argv[2], "w");
 	}
-		
+	if (salida == NULL)
+	{
+		printf("No se ha podido abrir el archivo para esciribir, se cerrará el programa\n");
+		pthread_mutex_destroy(&mutex_vacunas);
+		pthread_cond_destroy(&disponible);
+		pthread_cond_destroy(&no_disponible);
+		free(threads);
+		return 1;
+	}
+
+	//Repartir vacunas iniciales a cada centro
+	for (int i = 0; i < 5; i++)
+		vacunas[i] = numVacunasIniciales;
 	// Inicialización de threads para vacunar a cada habitante
 	for (int i = 0; i < numHabitantes; i++)
-		pthread_create(&threadsH[i], NULL, vacunarHabitante, &i);
+		pthread_create(&threads[i], NULL, vacunarHabitante, &i);
 
-	// Inicilización de threads para fabricar cada vacuna
-	for (int i = 0; i < numFarmacias; i++)
-		pthread_create(&threadsF[i], NULL, fabricarVacuna, &i);
 
 
 
@@ -68,31 +85,53 @@ int	main(int argc, char *argv[]) {
 
 	// Espera a que todos los threads hayan terminado
 	for (int i = 0; i < numHabitantes; i++)
-		pthread_join(threadsH[i], NULL);
-	for (int i = 0; i < numFarmacias; i++)
-		pthread_join(threadsF[i], NULL);
+		pthread_join(threads[i], NULL);
 
-	free(threadsH);
+	pthread_mutex_destroy(&mutex_vacunas);
+	pthread_cond_destroy(&disponible);
+	pthread_cond_destroy(&no_disponible);
+	free(threads);
 	return 0;
 }
 
 // Función que ejecutará cada thread para vacunar a un habitante
 void	*vacunarHabitante(void *arg) {
-	int id = *(int *)arg;
+	int num = *(int *)arg;	//numero del habitante
+	int	centroAsignado;
+	int	waitReaccion, waitDesplazamiento;
 
-	// Código para vacunar al habitante con el ID especificado
+	//srand(time(NULL));
+	// Esperar a que se entere de la vacunacion
+	waitReaccion = rand() % maxTiempoReaccion + 1;
+	sleep(waitReaccion);
+	
+	//Una vez se entera se le asigna el centro con random y escribimos
+	centroAsignado = rand() % 5;
+	printf("Habitante %d elige el centro %d para vacunarse\n", num, centroAsignado);
+	fprintf(salida, "Habitante %d elige el centro %d para vacunarse\n", num, centroAsignado);
+
+	// Una vez asignado, se espera a que se desplace al centro. En ese momento se hace el lock del mutex
+	waitDesplazamiento = rand() % maxTiempoDesplazamiento + 1;
+	sleep(waitDesplazamiento);
+	pthread_mutex_lock(&mutex_vacunas);
+
+	while (vacunas[centroAsignado] == 0) //Comprobamos si quedan o no vacunas y esperamos en el caso de que no
+		pthread_cond_wait(&disponible, &mutex_vacunas);
+
+	vacunas[centroAsignado]--;	// Quitamos una vacuna
+	printf("Habitante %d vacunado en el centro %d\n", num, centroAsignado);
+	fprintf(salida, "Habitante %d vacunado en el centro %d\n", num, centroAsignado);	
+
+	// Mandamos una señal de que no quedan vacunas, en el caso de que el habitante haya sido la última.
+	if (!vacunas[centroAsignado])
+		pthread_cond_signal(&no_disponible);
+	
+	//Unlock del mutex
+	pthread_mutex_unlock(&mutex_vacunas);
 
 	return 0;
 }
 
-// Función que ejecutará cada thread para fabricar una vacuna
-void	*fabricarVacuna(void *arg) {
-	int id = *(int *)arg;
-
-	// Código para fabricar una vacuna en la farmacia con el ID especificado
-
-	return 0;
-}
 
 void 	leerFichero(char *fichero) {
 	// Abrir el fichero de texto

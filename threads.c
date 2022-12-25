@@ -1,35 +1,41 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <stdlib.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 
 // Declaración de variables globales que se leen del fichero
-int numHabitantes; 
-int numVacunasIniciales;
-int minVacunasPorTanda;
-int maxVacunasPorTanda;
-int minTiempoFabricacion;
-int maxTiempoFabricacion;
+int	numHabitantes; 
+int	numVacunasIniciales;
+int	minVacunasPorTanda;
+int	maxVacunasPorTanda;
+int	minTiempoFabricacion;
+int	maxTiempoFabricacion;
 int	minTiempoReparto = 1;
-int maxTiempoReparto;
-int minTiempoReaccion = 1;
-int maxTiempoReaccion;
-int minTiempoDesplazamiento = 1;
+int	maxTiempoReparto;
+int	minTiempoReaccion = 1;
+int	maxTiempoReaccion;
+int	minTiempoDesplazamiento = 1;
 int	maxTiempoDesplazamiento;
 
 // Declaración de funciones
-void *vacunarHabitante(void *arg); // Función que ejecutará cada thread para vacunar a un habitante
-void *fabricarVacuna(void *arg); // Función que ejecutará cada thread para fabricar una vacuna
-void leerFichero(char *fichero); //Damos valores a las variables que faltan por inicializar
+void	*vacunarHabitante(void *arg); // Función que ejecutará cada thread para vacunar a un habitante
+void	*fabricarVacuna(void *arg); // Función que ejecutará cada thread para fabricar una vacuna
+void	leerFichero(char *fichero); //Damos valores a las variables que faltan por inicializar
 
-int main(int argc, char *argv[]) {
+int	main(int argc, char *argv[]) {
 	// declaracion e inicialización de variables que no se leen del fichero
-	int numCentros = 5;
-	int numFarmacias = 3;
+	int	numCentros = 5;
+	int	numFarmacias = 3;
 
 	// Creación de threads para vacunar a cada habitante
-	pthread_t *threadsH;
+	pthread_t	*threadsH;
 	// Creación de threads para fabricar cada vacuna, no necesitaremos malloc porque las farmacias siempre serán 3
-	pthread_t threadsF[numFarmacias];
+	pthread_t	threadsF[numFarmacias];
+
+	FILE	*salida;
 
 	//Asignamos epacio para los threads de los habitantes con malloc
 	threadsH = (pthread_t *)malloc(sizeof(pthread_t) * numHabitantes);
@@ -37,15 +43,15 @@ int main(int argc, char *argv[]) {
 	// Llamamos a leer fichero para inicializar el resto de variables y declaramos las salidas
 	if (argc < 2) {
 		leerFichero("valores.txt");
-
+		salida = open("salida_vacunacion.txt", O_CREAT | O_WRONLY, 0666);
 	}
 	else if (argc == 2) {
 		leerFichero(argv[1]);
-
+		salida = open("salida_vacunacion.txt", O_CREAT | O_WRONLY, 0666);
 	}
 	else {
 		leerFichero(argv[1]);
-		
+		salida = open(argv[2], O_CREAT | O_WRONLY, 0666);
 	}
 		
 	// Inicialización de threads para vacunar a cada habitante
@@ -71,7 +77,7 @@ int main(int argc, char *argv[]) {
 }
 
 // Función que ejecutará cada thread para vacunar a un habitante
-void *vacunarHabitante(void *arg) {
+void	*vacunarHabitante(void *arg) {
 	int id = *(int *)arg;
 
 	// Código para vacunar al habitante con el ID especificado
@@ -80,7 +86,7 @@ void *vacunarHabitante(void *arg) {
 }
 
 // Función que ejecutará cada thread para fabricar una vacuna
-void *fabricarVacuna(void *arg) {
+void	*fabricarVacuna(void *arg) {
 	int id = *(int *)arg;
 
 	// Código para fabricar una vacuna en la farmacia con el ID especificado
@@ -88,7 +94,7 @@ void *fabricarVacuna(void *arg) {
 	return 0;
 }
 
-void  leerFichero(char *fichero) {
+void 	leerFichero(char *fichero) {
 	// Abrir el fichero de texto
 	FILE *fp = fopen(fichero, "r");
 

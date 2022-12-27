@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <stdlib.h>
-#include <time.h>
+#include <math.h>
 #include <unistd.h>
 
 // Declaración de variables globales que se leen del fichero
@@ -21,15 +21,17 @@ int	vacunas[5];
 int demanda[5];
 //Array de las vacunas totales que lleva cada fabrica
 int	vacunasTotales[3];
-
+// Cantidad de vacunados en una tanda
 int	vacunadosTanda;
+
+// Todos estos enteros nos serviran a modo de boolean
+int fabricando = 0; // Para controlar cúando una fábrica está haciendo o no vacunas
+int fin = 0;	//Para saber cúando han terminado las tandas, obligando a los threads de las fábricas a acabar aunque no hayan fabricado las 400 vacunas
 
 // Creacion del mutex de las vacunas por centro y de las condiciones
 pthread_mutex_t mutex_vacunas, mutex_fabricas;
 pthread_cond_t disponible;
 pthread_cond_t no_disponible;
-pthread_mutex_t mutex_tandaCompletada;
-pthread_cond_t cond_tandaCompletada;
 
 // Declaración del fichero por donde saldrá el resultado final
 FILE	*salida;
@@ -38,7 +40,6 @@ FILE	*salida;
 void	*vacunarHabitante(void *arg); // Función que ejecutará cada thread para vacunar a un habitante
 void	leerFichero(char *fichero); //Damos valores a las variables que faltan por inicializar
 void	*repartirFabrica(void *arg);
-void	waitTandaCompletada();
 
 int	main(int argc, char *argv[]) {
 	// Creación de threads para vacunar a cada habitante
@@ -46,7 +47,7 @@ int	main(int argc, char *argv[]) {
 	pthread_t	threadsF[3];
 	int			idHabitante = 0;
 	int			idHabitanteJoin = 0;
-	int			noDemanda;
+	int			aux;
 
 	//Asignamos espacio para los threads de los habitantes con malloc
 	threads = (pthread_t *)malloc(sizeof(pthread_t) * numHabitantes);
@@ -62,8 +63,6 @@ int	main(int argc, char *argv[]) {
 	pthread_mutex_init(&mutex_fabricas, NULL);
 	pthread_cond_init(&disponible, NULL);
 	pthread_cond_init(&no_disponible, NULL);
-	pthread_mutex_init(&mutex_tandaCompletada, NULL);
-	pthread_cond_init(&cond_tandaCompletada, NULL);
 
 	// Llamamos a leer fichero para inicializar el resto de variables y declaramos el fichero de salida
 	if (argc < 2) {
@@ -84,8 +83,6 @@ int	main(int argc, char *argv[]) {
 		pthread_mutex_destroy(&mutex_vacunas);
 		pthread_cond_destroy(&disponible);
 		pthread_cond_destroy(&no_disponible);
-		pthread_mutex_destroy(&mutex_tandaCompletada);
-		pthread_cond_destroy(&cond_tandaCompletada);
 		free(threads);
 		return 1;
 	}
@@ -96,51 +93,43 @@ int	main(int argc, char *argv[]) {
 
 	// Inicialización de threads para cada fabrica
 	for (int i = 1; i <= 3; i++) {
-		int	num = i;
+		aux = i;
 		pthread_create(&threadsF[i], NULL, repartirFabrica, &i);
-		while (num == i)
+		while (aux == i)
 			sleep(0.1);
-		i = num;
+		i = aux;
 	}
 
 	for (int j = 1; j <= 10; j++){
 		printf("TANDA %d\n", j);
-		noDemanda = 0;
 		vacunadosTanda = 0;
 		// Inicialización de threads para vacunar a cada habitante
 		for (int i = 1; i <= numHabitantes / 10; i++) {
 			idHabitante++;
-			int	num = idHabitante;
+			aux = idHabitante;
 			pthread_create(&threads[idHabitante], NULL, vacunarHabitante, &idHabitante);
-			while (num == idHabitante)
+			while (aux == idHabitante)
 				sleep(0.1);
-			idHabitante = num;
+			idHabitante = aux;
 		}
-
-		/*while (!noDemanda)
-			if (demanda[0] == 0 && demanda[1] == 0 && demanda[2] == 0 && demanda[3] == 0 && demanda[4] == 0){
-				noDemanda = 1;
-
-			}*/
 
 		// Espera a que todos los threads hayan terminado
 		for (int i = 1; i <= numHabitantes / 10; i++) {
 			idHabitanteJoin++;
 			pthread_join(threads[idHabitanteJoin], NULL);
-			printf("HABITANTE %d TERMINADO\n", idHabitanteJoin);
 		}
 	}
 
+	fin = 1;
+
 	// Espera a que todos los threads hayan terminado
-	for (int i = 1; i <= 3; i++)
-		pthread_join(threadsF[i], NULL);
+	/*for (int i = 1; i <= 3; i++)
+		pthread_join(threadsF[i], NULL);*/
 
 	pthread_mutex_destroy(&mutex_vacunas);
 	pthread_mutex_destroy(&mutex_fabricas);
 	pthread_cond_destroy(&disponible);
 	pthread_cond_destroy(&no_disponible);
-	pthread_mutex_destroy(&mutex_tandaCompletada);
-	pthread_cond_destroy(&cond_tandaCompletada);
 	free(threads);
 	return 0;
 }
@@ -152,7 +141,6 @@ void	*vacunarHabitante(void *arg) {
 	int	centroAsignado;
 	int	waitReaccion, waitDesplazamiento;
 
-	//srand(time(NULL));
 	// Esperar a que se entere de la vacunacion
 	waitReaccion = rand() % maxTiempoReaccion + 1;
 	sleep(waitReaccion);
@@ -165,15 +153,17 @@ void	*vacunarHabitante(void *arg) {
 	// Una vez asignado, se espera a que se desplace al centro. En ese momento se hace el lock del mutex
 	waitDesplazamiento = rand() % maxTiempoDesplazamiento + 1;
 	sleep(waitDesplazamiento);
+
 	pthread_mutex_lock(&mutex_vacunas);
 
 	demanda[centroAsignado - 1]++;	//Aumentamos la demanda
+
 	while (vacunas[centroAsignado - 1] == 0){//Comprobamos si quedan o no vacunas y esperamos en el caso de que no
-		printf("NO QUEDAN VACUNAS\n");
 		pthread_cond_signal(&no_disponible);
 		pthread_cond_wait(&disponible, &mutex_vacunas);
 	}
-
+	pthread_mutex_unlock(&mutex_vacunas);
+	pthread_mutex_lock(&mutex_vacunas);
 	vacunas[centroAsignado - 1]--;	// Quitamos una vacuna
 	demanda[centroAsignado - 1]--;	//Bajamos la demanda
 	vacunadosTanda++;
@@ -181,11 +171,12 @@ void	*vacunarHabitante(void *arg) {
 	fprintf(salida, "Habitante %d vacunado en el centro %d\n", num, centroAsignado);
 
 	//Mandamos una señal de que no quedan vacunas, en el caso de que el habitante haya sido la última.
-	/*if (!vacunas[centroAsignado - 1])
-		pthread_cond_signal(&no_disponible[centroAsignado - 1]);*/
+	/*if (vacunas[centroAsignado - 1] == 0)
+		pthread_cond_signal(&no_disponible);*/
 	
 	//Unlock del mutex
 	pthread_mutex_unlock(&mutex_vacunas);
+	return 0;
 }
 
 void	*repartirFabrica(void *arg) {
@@ -196,14 +187,23 @@ void	*repartirFabrica(void *arg) {
 	int demandaTotal;
 	int	vacunasFabricadas;
 
-	while (vacunasTotales[num-1] <= 400) {
+	while (vacunasTotales[num-1] <= 400 || fin == 1) {
 		vacunasFabricadas = 0;
 		demandaTotal = 0;
+		fabricando = 0;
+
+		pthread_mutex_lock(&mutex_fabricas);
+		while (fabricando == 0) {
+			pthread_cond_wait(&no_disponible, &mutex_fabricas);
+			fabricando = 1;
+		}
+		pthread_mutex_unlock(&mutex_fabricas);
+		fabricando = 0;
 
 		waitFabricacion = rand() % (maxTiempoFabricacion - minTiempoFabricacion + 1) + minTiempoFabricacion;
-		sleep(0);
+		sleep(waitFabricacion);
 		waitReparto = rand() % maxTiempoReparto + 1;	//Se ponen juntos para que no se cuele ningun otro thread entre medias
-		sleep(0);
+		sleep(waitReparto);
 		
 		fabricacionTanda = rand() % (maxVacunasPorTanda - minVacunasPorTanda + 1) + minVacunasPorTanda;
 
@@ -211,41 +211,31 @@ void	*repartirFabrica(void *arg) {
 		if (vacunasTotales[num-1] > 400)
 			fabricacionTanda = fabricacionTanda - (vacunasTotales[num-1] - 400);
 
-		pthread_mutex_lock(&mutex_fabricas);
 		printf("FABRICA %d ESPERANDO A NO DISPONIBLE\n", num);
-		pthread_cond_wait(&no_disponible, &mutex_fabricas);
-		pthread_mutex_unlock(&mutex_fabricas);
+		printf ("VACUNAS 1: %d, VACUNAS 2: %d, VACUNAS 3: %d, VACUNAS 4: %d, VACUNAS 5: %d\n", vacunas[0], vacunas[1], vacunas[2], vacunas[3], vacunas[4]);
+		printf ("DEMANDA 1: %d, DEMANDA 2: %d, DEMANDA 3: %d, DEMANDA 4: %d, DEMANDA 5: %d\n", demanda[0], demanda[1], demanda[2], demanda[3], demanda[4]);
+
 		pthread_mutex_lock(&mutex_fabricas);
+	
 		printf("Fábrica %d prepara %d vacunas\n", num, fabricacionTanda);
 		fprintf(salida, "Fábrica %d prepara %d vacunas\n", num, fabricacionTanda);
 
 		for (int i = 0; i < 5; i++)
 			demandaTotal = demandaTotal + demanda[i];
 		for (int i = 0; i < 5; i++) {
-			vacunasFabricadas = fabricacionTanda * demanda[i] / demandaTotal;
-			vacunas[i] = vacunas[i] + (int)vacunasFabricadas;
+			printf("demanda %d / demanda total %d\n", demanda[i], demandaTotal);
+			vacunasFabricadas = round(fabricacionTanda * demanda[i] / demandaTotal);
+			vacunas[i] = vacunas[i] + vacunasFabricadas;
+
 			printf("Fábrica %d entrega %d vacunas en el centro %d\n", num, vacunasFabricadas, i+1);
 			fprintf(salida, "Fábrica %d entrega %d vacunas en el centro %d\n", num, vacunasFabricadas, i+1);
 		}
 		
-		pthread_cond_signal(&disponible);
-		printf("VACUNAS DISPONIBLES\n");
+		for (int i = 0; i < demandaTotal; i++)
+			pthread_cond_signal(&disponible);
 		pthread_mutex_unlock(&mutex_fabricas);
-
-		//waitTandaCompletada();
-
 	}
-	printf ("YA HAY 400\n");
-}
-
-void	waitTandaCompletada() {
-	pthread_mutex_lock(&mutex_tandaCompletada);
-	if (vacunadosTanda == numHabitantes / 10) {
-		vacunadosTanda = 0;
-		pthread_cond_signal(&cond_tandaCompletada);
-	} else
-		pthread_cond_wait(&cond_tandaCompletada, &mutex_tandaCompletada);
-	pthread_mutex_unlock(&mutex_tandaCompletada);
+	return 0;
 }
 
 void 	leerFichero(char *fichero) {

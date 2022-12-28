@@ -21,8 +21,9 @@ int	vacunas[5];
 int demanda[5];
 //Array de las vacunas totales que lleva cada fabrica
 int	vacunasTotales[3];
-// Cantidad de vacunados en una tanda
-int	vacunadosTanda;
+
+int fabricaFin[3];
+int creandoVacunas = 0;
 
 // Todos estos enteros nos serviran a modo de boolean
 int fabricando = 0; // Para controlar cúando una fábrica está haciendo o no vacunas
@@ -63,8 +64,10 @@ int	main(int argc, char *argv[]) {
 	for (int i = 0; i < 5; i++)
 		demanda[i] = 0;
 
-	for (int i = 0; i < 3; i++)
+	for (int i = 0; i < 3; i++){
 		vacunasTotales[i] = 0;
+		fabricaFin[i] = 0;
+	}
 
 	// Inicializacion del mutex y de las condiciones
 	pthread_mutex_init(&mutex_vacunas, NULL);
@@ -74,21 +77,30 @@ int	main(int argc, char *argv[]) {
 
 	// Llamamos a leer fichero para inicializar el resto de variables y declaramos el fichero de salida
 	if (argc < 2) {
-		leerFichero("valores.txt");
-		salida = fopen("salida_vacunacion.txt", "w");
+		leerFichero("entrada_vacunacion.txt");
+		salida = fopen("salida_vacunacion.txt", "a");
 	}
 	else if (argc == 2) {
+		if (access(argv[1], R_OK) != 0){
+			printf ("El archivo introducido de lectura no existe\n");
+			return (1);
+		}
 		leerFichero(argv[1]);
-		salida = fopen("salida_vacunacion.txt", "w");
+		salida = fopen("salida_vacunacion.txt", "a");
 	}
 	else {
+		if (access(argv[1], R_OK) != 0){
+			printf ("El archivo introducido de lectura no existe\n");
+			return (1);
+		}
 		leerFichero(argv[1]);
-		salida = fopen(argv[2], "w");
+		salida = fopen(argv[2], "a");
 	}
 	if (salida == NULL)
 	{
 		printf("No se ha podido abrir el archivo para esciribir, se cerrará el programa\n");
 		pthread_mutex_destroy(&mutex_vacunas);
+		pthread_mutex_destroy(&mutex_fabricas);
 		pthread_cond_destroy(&disponible);
 		pthread_cond_destroy(&no_disponible);
 		free(threads);
@@ -104,20 +116,18 @@ int	main(int argc, char *argv[]) {
 	// Inicialización de threads para cada fabrica
 	for (int i = 1; i <= 3; i++) {
 		aux = i;
-		pthread_create(&threadsF[i], NULL, repartirFabrica, &i);
+		pthread_create(&threadsF[i-1], NULL, repartirFabrica, &i);
 		while (aux == i)
 			sleep(0.1);
 		i = aux;
 	}
 
 	for (int j = 1; j <= 10; j++){
-		printf("TANDA %d\n", j);
-		vacunadosTanda = 0;
 		// Inicialización de threads para vacunar a cada habitante
 		for (int i = 1; i <= numHabitantes / 10; i++) {
 			idHabitante++;
 			aux = idHabitante;
-			pthread_create(&threads[idHabitante], NULL, vacunarHabitante, &idHabitante);
+			pthread_create(&threads[idHabitante-1], NULL, vacunarHabitante, &idHabitante);
 			while (aux == idHabitante)
 				sleep(0.1);
 			idHabitante = aux;
@@ -126,15 +136,18 @@ int	main(int argc, char *argv[]) {
 		// Espera a que todos los threads hayan terminado
 		for (int i = 1; i <= numHabitantes / 10; i++) {
 			idHabitanteJoin++;
-			pthread_join(threads[idHabitanteJoin], NULL);
+			pthread_join(threads[idHabitanteJoin-1], NULL);
 		}
 	}
 
 	fin = 1;
 
 	// Espera a que todos los threads hayan terminado
-	for (int i = 1; i <= 3; i++)
-		pthread_join(threadsF[i], NULL);
+	for (int i = 1; i <= 3; i++){
+		while(fabricaFin[0] == 0 || fabricaFin[1] == 0 || fabricaFin[2] == 0)
+			pthread_cond_signal(&no_disponible);
+		pthread_join(threadsF[i-1], NULL);
+	}
 
 	estadisticasFinales(salida);
 
@@ -142,7 +155,7 @@ int	main(int argc, char *argv[]) {
 	pthread_mutex_destroy(&mutex_fabricas);
 	pthread_cond_destroy(&disponible);
 	pthread_cond_destroy(&no_disponible);
-	free(threads);
+
 	return 0;
 }
 
@@ -159,9 +172,10 @@ void	*vacunarHabitante(void *arg) {
 	
 	//Una vez se entera se le asigna el centro con random y escribimos
 	centroAsignado = rand() % 5 + 1;
-	printf("Habitante %d elige el centro %d para vacunarse\n", num, centroAsignado);
-	fprintf(salida, "Habitante %d elige el centro %d para vacunarse\n", num, centroAsignado);
 
+	printf("Habitante %d elige el centro %d para vacunarse\n", num, centroAsignado);
+	//fprintf(salida, "Habitante %d elige el centro %d para vacunarse\n", num, centroAsignado);
+	
 	// Una vez asignado, se espera a que se desplace al centro. En ese momento se hace el lock del mutex
 	waitDesplazamiento = rand() % maxTiempoDesplazamiento + 1;
 	sleep(waitDesplazamiento);
@@ -171,21 +185,16 @@ void	*vacunarHabitante(void *arg) {
 	demanda[centroAsignado - 1]++;	//Aumentamos la demanda
 
 	while (vacunas[centroAsignado - 1] == 0){//Comprobamos si quedan o no vacunas y esperamos en el caso de que no
-		pthread_cond_signal(&no_disponible);
+		if (creandoVacunas == 0)
+			pthread_cond_signal(&no_disponible);
 		pthread_cond_wait(&disponible, &mutex_vacunas);
 	}
-	pthread_mutex_unlock(&mutex_vacunas);
-	pthread_mutex_lock(&mutex_vacunas);
+
 	vacunas[centroAsignado - 1]--;	// Quitamos una vacuna
 	demanda[centroAsignado - 1]--;	//Bajamos la demanda
 	habitantesVacunadosTotales[centroAsignado - 1]++;
-	vacunadosTanda++;
 	printf("Habitante %d vacunado en el centro %d\n", num, centroAsignado);
-	fprintf(salida, "Habitante %d vacunado en el centro %d\n", num, centroAsignado);
-
-	//Mandamos una señal de que no quedan vacunas, en el caso de que el habitante haya sido la última.
-	/*if (vacunas[centroAsignado - 1] == 0)
-		pthread_cond_signal(&no_disponible);*/
+	//fprintf(salida, "Habitante %d vacunado en el centro %d\n", num, centroAsignado);
 	
 	//Unlock del mutex
 	pthread_mutex_unlock(&mutex_vacunas);
@@ -200,53 +209,62 @@ void	*repartirFabrica(void *arg) {
 	int demandaTotal;
 	int	vacunasFabricadas;
 
-	while (vacunasTotales[num-1] <= 400 || fin == 1) {
+	while (vacunasTotales[num-1] <= 400 && fin == 0) {
 		vacunasFabricadas = 0;
 		demandaTotal = 0;
 		fabricando = 0;
+		creandoVacunas = 0;
 
 		pthread_mutex_lock(&mutex_fabricas);
-		while (fabricando == 0) {
+		while (fabricando == 0 && fin == 0) {
 			pthread_cond_wait(&no_disponible, &mutex_fabricas);
+			creandoVacunas = 1;
 			fabricando = 1;
 		}
+		if (fin == 1){
+			pthread_mutex_unlock(&mutex_fabricas);
+			fabricaFin[num-1] = 1;
+			return 0;
+		}
+
 		pthread_mutex_unlock(&mutex_fabricas);
 		fabricando = 0;
 
 		waitFabricacion = rand() % (maxTiempoFabricacion - minTiempoFabricacion + 1) + minTiempoFabricacion;
-		sleep(waitFabricacion);
+		sleep(3);
 		waitReparto = rand() % maxTiempoReparto + 1;	//Se ponen juntos para que no se cuele ningun otro thread entre medias
-		sleep(waitReparto);
+		sleep(3);
 		
-		fabricacionTanda = rand() % (maxVacunasPorTanda - minVacunasPorTanda + 1) + minVacunasPorTanda;
+		fabricacionTanda = rand() % (maxVacunasPorTanda - minVacunasPorTanda + 1) + minVacunasPorTanda; //Calculas las vacunas que vas a hacer en esta tanda
 
-		vacunasTotales[num-1] = vacunasTotales[num-1] + fabricacionTanda;
+		vacunasTotales[num-1] = vacunasTotales[num-1] + fabricacionTanda;	//Añade las vacunas fabricadas para saber si llega a 400
 		if (vacunasTotales[num-1] > 400)
 			fabricacionTanda = fabricacionTanda - (vacunasTotales[num-1] - 400);
 
-		printf("FABRICA %d ESPERANDO A NO DISPONIBLE\n", num);
-		printf ("VACUNAS 1: %d, VACUNAS 2: %d, VACUNAS 3: %d, VACUNAS 4: %d, VACUNAS 5: %d\n", vacunas[0], vacunas[1], vacunas[2], vacunas[3], vacunas[4]);
-		printf ("DEMANDA 1: %d, DEMANDA 2: %d, DEMANDA 3: %d, DEMANDA 4: %d, DEMANDA 5: %d\n", demanda[0], demanda[1], demanda[2], demanda[3], demanda[4]);
-
 		pthread_mutex_lock(&mutex_fabricas);
-	
+
 		printf("Fábrica %d prepara %d vacunas\n", num, fabricacionTanda);
-		fprintf(salida, "Fábrica %d prepara %d vacunas\n", num, fabricacionTanda);
+		//fprintf(salida, "Fábrica %d prepara %d vacunas\n", num, fabricacionTanda);
 
 		for (int i = 0; i < 5; i++)
 			demandaTotal = demandaTotal + demanda[i];
 		for (int i = 0; i < 5; i++) {
-			printf("demanda %d / demanda total %d\n", demanda[i], demandaTotal);
-			vacunasFabricadas = round(fabricacionTanda * demanda[i] / demandaTotal);
-			vacunas[i] = vacunas[i] + vacunasFabricadas;
+			if (demandaTotal == 0)
+				demandaTotal = 1;
+
+			vacunasFabricadas = round(fabricacionTanda * demanda[i] / demandaTotal); //Calcula las vacunas que tiene que fabricar
+			vacunas[i] = vacunas[i] + vacunasFabricadas; // Se suman las vacunas a las que se han fabricado
+			//Aqui recogemos todas las vacunas recibidas y las entregadas a cada centro, es para las estadisticas finales
 			vacunasRecibidasTotales[i] = vacunasRecibidasTotales[i] + vacunasFabricadas;
 			vacunasEntregadasCentro[num-1][i] = vacunasEntregadasCentro[num-1][i] + vacunasFabricadas;
+
 			printf("Fábrica %d entrega %d vacunas en el centro %d\n", num, vacunasFabricadas, i+1);
-			fprintf(salida, "Fábrica %d entrega %d vacunas en el centro %d\n", num, vacunasFabricadas, i+1);
+			//fprintf(salida, "Fábrica %d entrega %d vacunas en el centro %d\n", num, vacunasFabricadas, i+1);
 		}
 		
-		for (int i = 0; i < demandaTotal; i++)
+		for (int i = 0; i < demandaTotal; i++)	//Mandamos tantas señales como habitantes las estén esperando
 			pthread_cond_signal(&disponible);
+
 		pthread_mutex_unlock(&mutex_fabricas);
 	}
 	return 0;
@@ -273,6 +291,7 @@ void 	leerFichero(char *fichero) {
 
 void	configuracionInicial(FILE *salida){
 
+	printf("VACUNACIÓN EN PANDEMIA: CONFIGURACIÓN INICIAL\n");
 	printf("Habitantes: %d\n", numHabitantes);
 	printf("Centros de vacunación: 5\n");
 	printf("Fábricas: 3\n");
@@ -284,7 +303,12 @@ void	configuracionInicial(FILE *salida){
 	printf("Tiempo máximo de reparto de vacunas a los centros: %d\n", maxTiempoReparto);
 	printf("Tiempo máximo que un habitante tarda en ver que está citado para vacunarse: %d\n", maxTiempoReaccion);
 	printf("Tiempo máximo de desplazamineto del habitante al centro de vacunación: %d\n", maxTiempoDesplazamiento);
+	printf("\n");
+	printf("PROCESO DE VACUNACIÓN\n");
+}
 
+void	estadisticasFinales(FILE *salida){
+	fprintf(salida, "VACUNACIÓN EN PANDEMIA: CONFIGURACIÓN INICIAL\n");
 	fprintf(salida, "Habitantes: %d\n", numHabitantes);
 	fprintf(salida, "Centros de vacunación: 5\n");
 	fprintf(salida, "Fábricas: 3\n");
@@ -296,9 +320,8 @@ void	configuracionInicial(FILE *salida){
 	fprintf(salida, "Tiempo máximo de reparto de vacunas a los centros: %d\n", maxTiempoReparto);
 	fprintf(salida, "Tiempo máximo que un habitante tarda en ver que está citado para vacunarse: %d\n", maxTiempoReaccion);
 	fprintf(salida, "Tiempo máximo de desplazamineto del habitante al centro de vacunación: %d\n", maxTiempoDesplazamiento);
-}
-
-void	estadisticasFinales(FILE *salida){
+	fprintf(salida, "\n");
+	fprintf(salida, "PROCESO DE VACUNACIÓN\n");
 
 	for (int i = 0; i < 3; i++){
 		printf("La fábrica %d ha fabricado %d vacunas totales\n", i + 1, vacunasTotales[i]);
@@ -307,15 +330,18 @@ void	estadisticasFinales(FILE *salida){
 			printf("La fábrica %d ha entregado %d vacunas totales al centro %d\n", i+1, vacunasEntregadasCentro[i][j], j+1);
 			fprintf(salida, "La fábrica %d ha entregado %d vacunas totales al centro %d\n", i+1, vacunasEntregadasCentro[i][j], j+1);
 		}
+		printf("\n");
+		fprintf(salida, "\n");
 	}
 
 	for (int i = 0; i < 5; i++){
 		printf("El centro %d ha recibido un total de %d vacunas\n", i + 1, vacunasRecibidasTotales[i]);
 		fprintf(salida, "El centro %d ha recibido un total de %d vacunas\n", i + 1, vacunasRecibidasTotales[i]);
 		printf("En el centro %d se han vacunado un total de %d habitantes\n", i + 1, habitantesVacunadosTotales[i]);
-		fprintf("En el centro %d se han vacunado un total de %d habitantes\n", i + 1, habitantesVacunadosTotales[i]);
+		fprintf(salida, "En el centro %d se han vacunado un total de %d habitantes\n", i + 1, habitantesVacunadosTotales[i]);
 		printf("En el centro %d han acabado sobrando %d vacunas\n", i + 1, vacunas[i]);
 		fprintf(salida, "En el centro %d han acabado sobrando %d vacunas\n", i + 1, vacunas[i]);
+		printf("\n");
+		fprintf(salida, "\n");
 	}
-
 }

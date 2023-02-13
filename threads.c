@@ -129,6 +129,7 @@ int	main(int argc, char *argv[]) {
 		pthread_join(threadsF[i-1], NULL);
 
 	printf ("\n¡TODOS LOS HABITANTES SE HAN VACUNADO!\n");
+	fprintf (salida, "\n¡TODOS LOS HABITANTES SE HAN VACUNADO!\n");
 
 	estadisticasFinales(salida);
 
@@ -190,6 +191,7 @@ void	*repartirFabrica(void *arg) {
 	int	vacunasFabricadas[5];
 	int	sumaVacunasFabricadas;
 	int	vacunasAux;
+	int	centroRand;
 	int i;
 
 	while (vacunasTotales[num-1] < numHabitantes/3) {
@@ -221,33 +223,38 @@ void	*repartirFabrica(void *arg) {
 		for (i = 0; i < 5; i++)
 			demandaTotal = demandaTotal + demanda[i];
 
-		for (i = 0; i < 5; i++){	//FABRICACION DE VACUNAS
-			//if (demandaTotal == 0)
-				vacunasFabricadas[i] = fabricacionTanda / 5;
-			//else
-			//	vacunasFabricadas[i] = fabricacionTanda * demanda[i] / demandaTotal; //Calcula las vacunas que tiene que fabricar
-		}
-		if (fabricacionTanda % 5 != 0)
-			vacunasFabricadas[0] = vacunasFabricadas[0] + (fabricacionTanda % 5);
-
+		if (demandaTotal > 0 && demandaTotal <= fabricacionTanda) //FABRICACION DE VACUNAS
+			for (i = 0; i < 5; i++){
+				//vacunasFabricadas[i] = fabricacionTanda * demanda[i] / demandaTotal; //Calcula las vacunas que tiene que fabricar
+				vacunasFabricadas[i] = demanda[i];
+			}
 
 		//Comprobacion por si faltan vacunas al repartir
-		for (i = 0; i < 5; i++){
+		for (i = 0; i < 5; i++)
 			sumaVacunasFabricadas = sumaVacunasFabricadas + vacunasFabricadas[i];
-		}
-		if (sumaVacunasFabricadas < fabricacionTanda)
-			vacunasFabricadas[0] = vacunasFabricadas[0] + (fabricacionTanda - sumaVacunasFabricadas);
 
+		if (sumaVacunasFabricadas < fabricacionTanda)
+			for (i = 0; i < 5; i++)
+				vacunasFabricadas[i] = vacunasFabricadas[i] + ((fabricacionTanda - sumaVacunasFabricadas) / 5);
+
+		//Se vuelve a comprobar si faltan vacunas a repartir
+		sumaVacunasFabricadas = 0;
+		for (i = 0; i < 5; i++)
+			sumaVacunasFabricadas = sumaVacunasFabricadas + vacunasFabricadas[i];
+	
+		centroRand = rand() % 5; //Centro aleatorio donde se repartiran las vacunas sobrantes
+		/*if (fabricacionTanda % 5 != 0)
+			vacunasFabricadas[centroRand] = vacunasFabricadas[centroRand] + (fabricacionTanda % 5);*/
+	
+		if (sumaVacunasFabricadas < fabricacionTanda)
+			vacunasFabricadas[centroRand] = vacunasFabricadas[centroRand] + (fabricacionTanda - sumaVacunasFabricadas);
 		pthread_mutex_unlock(&mutex);
 
-		waitReparto = rand() % maxTiempoReparto + 1;	//Se ponen juntos para que no se cuele ningun otro thread entre medias
+		waitReparto = rand() % maxTiempoReparto + 1;
 		sleep(waitReparto);
 
 		// REPARTO
 		pthread_mutex_lock(&mutex);
-
-		for (i = 0; i < 5; i++)
-			demandaTotal = demandaTotal + demanda[i];	//Es necesario volver a calcularlo por si alguien se ha vacunado entre medias del mutex.
 
 		for (i = 0; i < 5; i++) {	//REPARTO DE VACUNAS
 			vacunas[i] = vacunas[i] + vacunasFabricadas[i];
@@ -258,6 +265,9 @@ void	*repartirFabrica(void *arg) {
 			printf("Fábrica %d entrega %d vacunas en el centro %d\n", num, vacunasFabricadas[i], i+1);
 			fprintf(salida, "Fábrica %d entrega %d vacunas en el centro %d\n", num, vacunasFabricadas[i], i+1);
 		}	
+
+		for (i = 0; i < 5; i++)
+			demandaTotal = demandaTotal + demanda[i];	//Es necesario volver a calcularlo por si alguien se ha vacunado entre medias del mutex.
 
 		for (i = 0; i < demandaTotal; i++)
 			pthread_cond_signal(&disponible);

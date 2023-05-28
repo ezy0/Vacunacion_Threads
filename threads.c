@@ -123,7 +123,6 @@ int	main(int argc, char *argv[]) {
 		}
 	}
 
-
 	// Espera a que todos los threads hayan terminado
 	for (i = 1; i <= 3; i++)
 		pthread_join(threadsF[i-1], NULL);
@@ -171,9 +170,6 @@ void	*vacunarHabitante(void *arg) {
 	vacunas[centroAsignado - 1]--;	// Quitamos una vacuna
 	demanda[centroAsignado - 1]--;	//Bajamos la demanda
 	habitantesVacunadosTotales[centroAsignado - 1]++;
-	
-	/*if (vacunas[0] != 0 && vacunas[1] != 0 && vacunas[2] != 0 && vacunas[3] != 0 && vacunas[4] != 0)
-		pthread_cond_signal(&disponible);*/
 
 	pthread_mutex_unlock(&mutex);
 
